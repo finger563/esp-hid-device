@@ -1,6 +1,8 @@
 # esp-hid-device
 
-Simple test for a BLE HID Device to send input reports and measure latency (how long the input report takes to send, be received, and for the receiver to toggle a pin connected back to this device / sending board).
+Simple test for a BLE HID Device to send input reports and measure latency (how
+long the input report takes to send, be received, and for the receiver to toggle
+a pin connected back to this device / sending board).
 
 ## Videos
 
@@ -16,4 +18,6 @@ https://user-images.githubusercontent.com/213467/206505448-c10c6750-ec82-46f1-8e
 
 ## Related
 
+* [ESP-IDF BT/BLE HID Device Example](https://github.com/espressif/esp-idf/tree/master/examples/bluetooth/esp_hid_device)
 * [ESP BLE Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad)
+* [ESP HID Host](https://github.com/finger563/esp-hid-host)

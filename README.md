@@ -18,6 +18,7 @@ https://user-images.githubusercontent.com/213467/206505448-c10c6750-ec82-46f1-8e
 
 ## Related
 
+* [ESP-IDF Bluetooth API](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/index.html)
 * [ESP-IDF BT/BLE HID Device Example](https://github.com/espressif/esp-idf/tree/master/examples/bluetooth/esp_hid_device)
 * [ESP BLE Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad)
 * [ESP HID Host](https://github.com/finger563/esp-hid-host)

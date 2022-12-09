@@ -11,7 +11,7 @@ set(EXTRA_COMPONENT_DIRS
 
 set(
   COMPONENTS
-  "main esptool_py driver esp_hid ble task format"
+  "main esptool_py driver esp_hid esp-nimble-cpp ble_gamepad task format"
   CACHE STRING
   "List of components to include"
 )

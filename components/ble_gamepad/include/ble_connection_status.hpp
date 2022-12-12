@@ -14,9 +14,12 @@
 class BleConnectionStatus : public NimBLEServerCallbacks {
 public:
     BleConnectionStatus(void);
+    ~BleConnectionStatus(void);
+
+    virtual void onConnect(NimBLEServer *pServer, NimBLEConnInfo& connInfo) override;
+    virtual void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo& connInfo, int reason) override;
+
     bool connected = false;
-    void onConnect(NimBLEServer *pServer, ble_gap_conn_desc* desc);
-    void onDisconnect(NimBLEServer *pServer);
     NimBLECharacteristic *inputGamepad;
 };
 

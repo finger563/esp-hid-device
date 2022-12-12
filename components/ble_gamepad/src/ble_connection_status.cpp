@@ -4,13 +4,17 @@ BleConnectionStatus::BleConnectionStatus(void)
 {
 }
 
-void BleConnectionStatus::onConnect(NimBLEServer *pServer, ble_gap_conn_desc* desc)
+BleConnectionStatus::~BleConnectionStatus(void)
 {
-    pServer->updateConnParams(desc->conn_handle, 6, 7, 0, 600);
+}
+
+void BleConnectionStatus::onConnect(NimBLEServer *pServer, NimBLEConnInfo& connInfo) {
+    printf("connected");
+    pServer->updateConnParams(connInfo.getConnHandle(), 6, 7, 0, 600);
     this->connected = true;
 }
 
-void BleConnectionStatus::onDisconnect(NimBLEServer *pServer)
-{
+void BleConnectionStatus::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo& connInfo, int reason) {
+    printf("disconnected\n");
     this->connected = false;
 }

@@ -41,7 +41,7 @@ extern "C" void app_main(void) {
   // for any edge and then have the ISR push to a FreeRTOS queue - this will
   // allow us to easily block until the queue has data, meaning the pin was
   // pressed.
-  static constexpr size_t RECV_GPIO = 21;
+  static constexpr size_t RECV_GPIO = 26;
   // create the gpio event queue
   gpio_evt_queue = xQueueCreate(2, sizeof(uint32_t));
   // setup gpio interrupts for boot button and mute button
@@ -88,8 +88,12 @@ extern "C" void app_main(void) {
           num_reports_sent++;
           float average_latency = total_elapsed_seconds / (float)num_reports_sent;
           // print
-          logger.info("Latency: {:.3f}s ({:.3f}s) ({:.3f}s - {:.3f}s)",
-                      elapsed_seconds, average_latency, min_elapsed_seconds, max_elapsed_seconds);
+          printf("\x1B[1A"); // go up a line
+          printf("\x1B[2K\r"); // erase the line
+          logger.info("[{}] Latency: {:.3f}s ({:.3f}s) ({:.3f}s - {:.3f}s)",
+                      start,
+                      elapsed_seconds,
+                      average_latency, min_elapsed_seconds, max_elapsed_seconds);
         } else {
           logger.warn("For some reason, we got a different gpio interrupt!");
         }
@@ -101,7 +105,8 @@ extern "C" void app_main(void) {
     } else {
       printf("\x1B[1A"); // go up a line
       printf("\x1B[2K\r"); // erase the line
-      logger.warn("[{}] Not connected, waiting for BLE HID Host connection...", std::chrono::high_resolution_clock::now());
+      logger.warn("[{}] Not connected, waiting for BLE HID Host connection...",
+                  std::chrono::high_resolution_clock::now());
       // so just wait a little longer..
       std::this_thread::sleep_for(1s);
     }

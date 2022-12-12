@@ -32,8 +32,10 @@ extern "C" void app_main(void) {
 
   // create the gamepad
   BleGamepad ble_gamepad("Backbone Two", "Backbone", 95);
+  BleGamepadConfiguration ble_gamepad_config;
+  ble_gamepad_config.setAutoReport(false); // normally true
   // and start advertising
-  ble_gamepad.begin();
+  ble_gamepad.begin(&ble_gamepad_config);
 
   // set up the gpio we'll use - we're going to set an ISR on the gpio to look
   // for any edge and then have the ISR push to a FreeRTOS queue - this will
@@ -71,6 +73,7 @@ extern "C" void app_main(void) {
       auto start = std::chrono::high_resolution_clock::now();
       // send the hid report
       ble_gamepad.press(BUTTON_5);
+      ble_gamepad.sendReport();
       // wait until pin is toggled (notified by ISR)
       if (xQueueReceive(gpio_evt_queue, &io_num, 100 / portTICK_PERIOD_MS) == pdTRUE) {
         // see if it's the pin we're looking for (it shouldn't be anything else)
@@ -96,7 +99,9 @@ extern "C" void app_main(void) {
       // try to get exactly the desired report rate
       std::this_thread::sleep_until(start + report_period);
     } else {
-      logger.warn("Not connected, waiting for BLE HID Host connection...");
+      printf("\x1B[1A"); // go up a line
+      printf("\x1B[2K\r"); // erase the line
+      logger.warn("[{}] Not connected, waiting for BLE HID Host connection...", std::chrono::high_resolution_clock::now());
       // so just wait a little longer..
       std::this_thread::sleep_for(1s);
     }

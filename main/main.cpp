@@ -10,6 +10,8 @@
 
 #include "esp_attr.h"
 #include "esp_err.h"
+#include "esp_pm.h"
+#include "esp_sleep.h"
 #include "driver/gpio.h"
 
 #include "format.hpp"
@@ -17,18 +19,32 @@
 
 #include "ble_gamepad.hpp"
 
+#define TEST_LATENCY 0
+#define TEST_POWER   1
+
 using namespace std::chrono_literals;
 
+#if TEST_LATENCY
 static QueueHandle_t gpio_evt_queue;
-static void gpio_isr_handler(void *arg) {
+static void IRAM_ATTR gpio_isr_handler(void *arg) {
   uint32_t gpio_num = (uint32_t)arg;
   xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
 }
+#endif
 
 extern "C" void app_main(void) {
   esp_err_t err;
   espp::Logger logger({.tag = "Backbone Two", .level = espp::Logger::Verbosity::INFO});
   logger.info("Bootup");
+
+#if TEST_POWER
+  esp_pm_config_esp32_t pm_config = {
+    .max_freq_mhz = 240, // e.g. 80, 160, 240
+    .min_freq_mhz = 40, // e.g. 40
+    .light_sleep_enable = true, // enable light sleep
+  };
+  ESP_ERROR_CHECK( esp_pm_configure(&pm_config) );
+#endif
 
   // create the gamepad
   BleGamepad ble_gamepad("Backbone Two", "Backbone", 95);
@@ -37,10 +53,8 @@ extern "C" void app_main(void) {
   // and start advertising
   ble_gamepad.begin(&ble_gamepad_config);
 
-  // set up the gpio we'll use - we're going to set an ISR on the gpio to look
-  // for any edge and then have the ISR push to a FreeRTOS queue - this will
-  // allow us to easily block until the queue has data, meaning the pin was
-  // pressed.
+#if TEST_LATENCY
+  // set up the gpio we'll use
   static constexpr size_t RECV_GPIO = 26;
   // create the gpio event queue
   gpio_evt_queue = xQueueCreate(2, sizeof(uint32_t));
@@ -51,26 +65,45 @@ extern "C" void app_main(void) {
   io_conf.intr_type = GPIO_INTR_ANYEDGE;
   io_conf.pin_bit_mask = (1<<RECV_GPIO);
   io_conf.mode = GPIO_MODE_INPUT;
-  io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+  io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+  io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
   gpio_config(&io_conf);
+
   //install gpio isr service
   gpio_install_isr_service(0);
   gpio_isr_handler_add((gpio_num_t)RECV_GPIO, gpio_isr_handler, (void*) RECV_GPIO);
+  // esp_sleep_enable_gpio_wakeup();
 
-  // now that we're good let's start sending data and measuring latency
+  // variables for measuring latency
+  uint32_t io_num = 0;
   int num_reports_sent = 0;
   float total_elapsed_seconds = 0;
   float max_elapsed_seconds = 0;
   float min_elapsed_seconds = 100;
+#endif
+
+  // now lets start sending reports
   auto report_period = 50ms;
-  uint32_t io_num = 0;
+  auto report_period_us = std::chrono::duration_cast<std::chrono::microseconds>(report_period).count();
   while (true) {
     if (ble_gamepad.isConnected()) {
+      auto start = std::chrono::high_resolution_clock::now();
+#if TEST_POWER
+      // send the hid report
+      ble_gamepad.press(BUTTON_5);
+      ble_gamepad.sendReport();
+      // set the wakeup timer
+      auto end = std::chrono::high_resolution_clock::now();
+      auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
+      esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+      esp_sleep_enable_timer_wakeup(report_period_us - elapsed_us);
+      // and sleep again till we need to wakeup
+      esp_light_sleep_start();
+#elif TEST_LATENCY
       auto num_waiting = uxQueueMessagesWaiting(gpio_evt_queue);
       if (num_waiting) {
         logger.warn("Queue already has {} entries!", (int)num_waiting);
       }
-      auto start = std::chrono::high_resolution_clock::now();
       // send the hid report
       ble_gamepad.press(BUTTON_5);
       ble_gamepad.sendReport();
@@ -102,9 +135,10 @@ extern "C" void app_main(void) {
       }
       // try to get exactly the desired report rate
       std::this_thread::sleep_until(start + report_period);
+#endif
     } else {
-      printf("\x1B[1A"); // go up a line
-      printf("\x1B[2K\r"); // erase the line
+      // printf("\x1B[1A"); // go up a line
+      // printf("\x1B[2K\r"); // erase the line
       logger.warn("[{}] Not connected, waiting for BLE HID Host connection...",
                   std::chrono::high_resolution_clock::now());
       // so just wait a little longer..

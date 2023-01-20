@@ -5,23 +5,146 @@
 #include <chrono>
 #include <string.h>
 
-#include "oneshot_adc.hpp"
+#include "driver/i2c.h"
+
+#include "ads1x15.hpp"
 #include "controller.hpp"
+#include "joystick.hpp"
 #include "logger.hpp"
+#include "mcp23x17.hpp"
+#include "oneshot_adc.hpp"
 #include "task.hpp"
 
 #include "ble_gamepad.hpp"
 
+#define I2C_NUM         (I2C_NUM_1)
+#define I2C_SCL_IO      (GPIO_NUM_40)
+#define I2C_SDA_IO      (GPIO_NUM_41)
+#define I2C_FREQ_HZ     (400 * 1000)
+#define I2C_TIMEOUT_MS  (10)
+
 using namespace std::chrono_literals;
+
+bool operator !=(const espp::Controller::State& lhs, const espp::Controller::State& rhs) {
+  return
+    lhs.a != rhs.a ||
+    lhs.b != rhs.b ||
+    lhs.x != rhs.x ||
+    lhs.y != rhs.y ||
+    lhs.select != rhs.select ||
+    lhs.start != rhs.start ||
+    lhs.up != rhs.up ||
+    lhs.down != rhs.down ||
+    lhs.left != rhs.left ||
+    lhs.right != rhs.right ||
+    lhs.joystick_select != rhs.joystick_select;
+}
 
 extern "C" void app_main(void) {
   esp_err_t err;
   espp::Logger logger({.tag = "LodeStone", .level = espp::Logger::Verbosity::INFO});
   logger.info("Bootup");
 
+  // make the I2C that we'll use to communicate
+  i2c_config_t i2c_cfg;
+  logger.info("initializing i2c driver...");
+  memset(&i2c_cfg, 0, sizeof(i2c_cfg));
+  i2c_cfg.sda_io_num = I2C_SDA_IO;
+  i2c_cfg.scl_io_num = I2C_SCL_IO;
+  i2c_cfg.mode = I2C_MODE_MASTER;
+  i2c_cfg.sda_pullup_en = GPIO_PULLUP_ENABLE;
+  i2c_cfg.scl_pullup_en = GPIO_PULLUP_ENABLE;
+  i2c_cfg.master.clk_speed = I2C_FREQ_HZ;
+  err = i2c_param_config(I2C_NUM, &i2c_cfg);
+  if (err != ESP_OK) logger.error("config i2c failed");
+  err = i2c_driver_install(I2C_NUM, I2C_MODE_MASTER,  0, 0, 0);
+  if (err != ESP_OK) logger.error("install i2c driver failed");
+
+  logger.info("Making MCP23017 lambda functions!");
+  // make some lambda functions we'll use to read/write to the mcp23x17
+  auto mcp23x17_write = [](uint8_t reg_addr, uint8_t value) {
+    uint8_t data[] = {reg_addr, value};
+    i2c_master_write_to_device(I2C_NUM,
+                               espp::Mcp23x17::ADDRESS,
+                               data,
+                               2,
+                               I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
+  };
+
+  auto mcp23x17_read = [](uint8_t reg_addr) -> uint8_t{
+    uint8_t data;
+    i2c_master_write_read_device(I2C_NUM,
+                                 espp::Mcp23x17::ADDRESS,
+                                 &reg_addr,
+                                 1,
+                                 &data,
+                                 1,
+                                 I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
+    return data;
+  };
+
+  logger.info("Making MCP23017");
+  // now make the mcp23x17 which handles GPIO
+  espp::Mcp23x17 mcp23x17({
+      .port_a_direction_mask = (1 << 0),   // input on A0
+      .port_a_interrupt_mask = (1 << 0),   // interrupt on A0
+      .port_b_direction_mask = (1 << 7),   // input on B7
+      .port_b_interrupt_mask = (1 << 7),   // interrupt on B7
+      .write = mcp23x17_write,
+      .read = mcp23x17_read,
+      .log_level = espp::Logger::Verbosity::WARN
+    });
+  // set pull up on the input pins
+  mcp23x17.set_pull_up(espp::Mcp23x17::Port::A, (1<<0));
+  mcp23x17.set_pull_up(espp::Mcp23x17::Port::B, (1<<7));
+
+  logger.info("Making ADS1015 lambda functions!");
+    // make some lambda functions we'll use to read/write to the i2c adc
+    auto ads_write = [](uint8_t reg_addr, uint16_t value) {
+      uint8_t write_buf[3] = {reg_addr, (uint8_t)(value >> 8), (uint8_t)(value & 0xFF)};
+      i2c_master_write_to_device(I2C_NUM,
+                                 espp::Ads1x15::ADDRESS,
+                                 write_buf,
+                                 3,
+                                 I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
+    };
+    auto ads_read = [](uint8_t reg_addr) -> uint16_t {
+      uint8_t read_data[2];
+      i2c_master_write_read_device(I2C_NUM,
+                                   espp::Ads1x15::ADDRESS,
+                                   &reg_addr,
+                                   1, // size of addr
+                                   read_data,
+                                   2,
+                                   I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
+      return (read_data[0] << 8) | read_data[1];
+    };
+
+    logger.info("Making ADS1015");
+    // make the actual ads class
+    espp::Ads1x15 ads(espp::Ads1x15::Ads1015Config{
+        .write = ads_write,
+        .read = ads_read
+      });
+
+    auto read_left_joystick = [&ads](float *x, float *y) -> bool {
+      // this will be in mv
+      auto x_mv = ads.sample_mv(0); // Left Joystick X is on channel 0
+      auto y_mv = ads.sample_mv(1); // Left Joystick Y is on channel 1
+      // convert [0, 3300]mV to approximately [-1.0f, 1.0f]
+      *x = (float)(x_mv) / 1700.0f - 1.0f;
+      *y = (float)(y_mv) / 1700.0f - 1.0f;
+      return true;
+    };
+    espp::Joystick left_joystick({
+        .x_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
+        .y_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
+        .get_values = read_left_joystick,
+      });
+
   // NOTE: the QtPy S3 has a NeoPixel on GPIO39 (power for it is GPIO38)
 
-  // NOTE: controller mapping:
+  // NOTE: RIGHT controller mapping:
   // * R2 -> A0 (GPIO18 / ADC2_CH7)
   // * R1 -> A1 (GPIO17 / ADC2_CH6)
   // * X  -> MI (GPIO37)
@@ -49,7 +172,7 @@ extern "C" void app_main(void) {
       .log_level = espp::Logger::Verbosity::WARN
     });
 
-  // create the adc confgiuration for the Joystick
+  // create the adc confgiuration for the right Joystick
   std::vector<espp::AdcConfig> channels{
     {
       // Ry
@@ -64,30 +187,45 @@ extern "C" void app_main(void) {
       .attenuation = ADC_ATTEN_DB_11
     }
   };
-  auto& ry_channel = channels[0];
-  auto& rx_channel = channels[1];
   espp::OneshotAdc adc({
       .unit = ADC_UNIT_1,
       .channels = channels,
     });
 
-  while (true) {
-    float rx = 0;
-    float ry = 0;
-    auto maybe_rx = adc.read_mv(rx_channel.channel);
-    if (maybe_rx.has_value()) {
-      rx = maybe_rx.value();
+  auto read_right_joystick = [&adc, &channels](float *x, float *y) -> bool {
+    // this will be in mv
+    auto maybe_x_mv = adc.read_mv(channels[0].channel);
+    auto maybe_y_mv = adc.read_mv(channels[1].channel);
+    if (maybe_x_mv.has_value() && maybe_y_mv.has_value()) {
+      auto x_mv = maybe_x_mv.value();
+      auto y_mv = maybe_y_mv.value();
+      // convert [0, 3300]mV to approximately [-1.0f, 1.0f]
+      *x = (float)(x_mv) / 1700.0f - 1.0f;
+      *y = (float)(y_mv) / 1700.0f - 1.0f;
+      return true;
     }
-    auto maybe_ry = adc.read_mv(ry_channel.channel);
-    if (maybe_ry.has_value()) {
-      ry = maybe_ry.value();
-    }
-    fmt::print("Joystick:\n"
-               "\tX:  {:.3f}\n"
-               "\tY:  {:.3f}\n",
-               rx,
-               ry);
+    return false;
+  };
+  espp::Joystick right_joystick({
+      .x_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
+      .y_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
+      .get_values = read_right_joystick,
+    });
+
+
+  while (false) {
     controller.update();
+    right_joystick.update();
+    left_joystick.update();
+    auto right_position = right_joystick.position();
+    auto left_position = left_joystick.position();
+    logger.info("Left: {}", left_position.to_string());
+    logger.info("Right: {}", right_position.to_string());
+
+    // read the left buttons (d-pad, etc.) using MCP23017
+    auto mcp_port_a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
+    auto mcp_port_b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
+
     bool is_a_pressed = controller.is_pressed(espp::Controller::Button::A);
     bool is_b_pressed = controller.is_pressed(espp::Controller::Button::B);
     bool is_x_pressed = controller.is_pressed(espp::Controller::Button::X);
@@ -114,7 +252,7 @@ extern "C" void app_main(void) {
     std::this_thread::sleep_for(100ms);
   }
 
-  // create the gamepad
+  // create the gamepad (third parameter is starting battery level)
   BleGamepad ble_gamepad("LodeStone", "Backbone", 95);
   BleGamepadConfiguration ble_gamepad_config;
   ble_gamepad_config.setAutoReport(false); // normally true
@@ -123,14 +261,75 @@ extern "C" void app_main(void) {
 
   // now that we're good let's start sending data
   auto report_period = 50ms;
+  // set the previous state
+  espp::Controller::State previous_state;
+  controller.update();
+  previous_state = controller.get_state();
   while (true) {
     if (ble_gamepad.isConnected()) {
       auto start = std::chrono::high_resolution_clock::now();
       // read the state of the controller
       controller.update();
-      // send the hid report
-      ble_gamepad.press(BUTTON_5);
-      ble_gamepad.sendReport();
+      auto current_state = controller.get_state();
+      bool state_changed = current_state != previous_state;
+      previous_state = current_state;
+
+      // build the report by setting the gamepad state
+      bool is_a_pressed = controller.is_pressed(espp::Controller::Button::A);
+      bool is_b_pressed = controller.is_pressed(espp::Controller::Button::B);
+      bool is_x_pressed = controller.is_pressed(espp::Controller::Button::X);
+      bool is_y_pressed = controller.is_pressed(espp::Controller::Button::Y);
+      bool is_select_pressed = controller.is_pressed(espp::Controller::Button::SELECT);
+      bool is_start_pressed = controller.is_pressed(espp::Controller::Button::START);
+      bool is_joystick_select_pressed = controller.is_pressed(espp::Controller::Button::JOYSTICK_SELECT);
+      if (is_a_pressed) {
+        ble_gamepad.press(BUTTON_1);
+      } else {
+        ble_gamepad.release(BUTTON_1);
+      }
+      if (is_b_pressed) {
+        ble_gamepad.press(BUTTON_2);
+      } else {
+        ble_gamepad.release(BUTTON_2);
+      }
+      if (is_x_pressed) {
+        ble_gamepad.press(BUTTON_3);
+      } else {
+        ble_gamepad.release(BUTTON_3);
+      }
+      if (is_y_pressed) {
+        ble_gamepad.press(BUTTON_3);
+      } else {
+        ble_gamepad.release(BUTTON_3);
+      }
+      if (is_select_pressed) {
+        ble_gamepad.pressSelect();
+      } else {
+        ble_gamepad.releaseSelect();
+      }
+      if (is_start_pressed) {
+        ble_gamepad.pressStart();
+      } else {
+        ble_gamepad.releaseStart();
+      }
+
+      // read the left buttons (d-pad, etc.) using MCP23017
+      auto a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
+      auto b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
+      // TODO: set the d-pad (HAT1)
+
+      // read the analog (right side)
+      right_joystick.update();
+      // TODO: set the Rx / Ry analog stick values in the report
+
+      // read the left analog stick using ADS1x15
+      left_joystick.update();
+      // TODO: set the Lx / Ly analog stick values in the report
+
+      // send the hid report, only if the button state changed?
+      if (state_changed) {
+        ble_gamepad.sendReport();
+      }
       // try to get exactly the desired report rate
       std::this_thread::sleep_until(start + report_period);
     } else {

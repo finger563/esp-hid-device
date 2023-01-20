@@ -19,31 +19,33 @@ extern "C" void app_main(void) {
   espp::Logger logger({.tag = "LodeStone", .level = espp::Logger::Verbosity::INFO});
   logger.info("Bootup");
 
+  // NOTE: the QtPy S3 has a NeoPixel on GPIO39 (power for it is GPIO38)
+
   // NOTE: controller mapping:
   // * R1 -> A0 (GPIO18)
   // * R2 -> A1 (GPIO17)
-  // * X  -> A2 (GPIO9)
+  // * X  -> MI (GPIO37)
   // * Y  -> A3 (GPIO8)
   // * Rx -> SDA (GPIO7 / ADC1_CH6)
   // * Ry -> SCL (GPIO6 / ADC1_CH5)
   // * Menu -> TX (GPIO5)
   // * Home -> RX (GPIO16)
   // * R3 -> SCK (GPIO36)
-  // * A  -> MI (GPIO37)
-  // * B  -> MO (GPIO35)
+  // * A  -> MO (GPIO35)
+  // * B  -> A2 (GPIO9)
 
   // create the controller (digital buttons) object
   espp::Controller controller(espp::Controller::DualConfig{
       // buttons short to ground, so they are active low. this will enable the
       // GPIO_PULLUP and invert the logic
       .active_low = true,
-      .gpio_a = 37, // MI on Qt Py S3, A on BB
-      .gpio_b = 35, // MO on Qt Py S3, B on BB
-      .gpio_x = 9, // A2 on Qt Py S3, X on BB
-      .gpio_y = 8, // A3 on Qt Py S3, Y on BB
-      .gpio_start = 16,  // RX on Qt Py S3, HOME on BB
-      .gpio_select = 5, // TX on Qt Py S3, MENU on BB
-      .gpio_joystick_select = 36, // SCK on Qt Py S3, R3 on BB
+      .gpio_a = 35,
+      .gpio_b = 9,
+      .gpio_x = 37,
+      .gpio_y = 8,
+      .gpio_start = 16,
+      .gpio_select = 5,
+      .gpio_joystick_select = 36,
       .log_level = espp::Logger::Verbosity::WARN
     });
 
@@ -62,12 +64,55 @@ extern "C" void app_main(void) {
       .attenuation = ADC_ATTEN_DB_11
     }
   };
-  auto& ry = channels[0];
-  auto& rx = channels[1];
+  auto& ry_channel = channels[0];
+  auto& rx_channel = channels[1];
   espp::OneshotAdc adc({
       .unit = ADC_UNIT_1,
       .channels = channels,
     });
+
+  while (true) {
+    float rx = 0;
+    float ry = 0;
+    auto maybe_rx = adc.read_mv(rx_channel.channel);
+    if (maybe_rx.has_value()) {
+      rx = maybe_rx.value();
+    }
+    auto maybe_ry = adc.read_mv(ry_channel.channel);
+    if (maybe_ry.has_value()) {
+      ry = maybe_ry.value();
+    }
+    fmt::print("Joystick:\n"
+               "\tX:  {:.3f}\n"
+               "\tY:  {:.3f}\n",
+               rx,
+               ry);
+    controller.update();
+    bool is_a_pressed = controller.is_pressed(espp::Controller::Button::A);
+    bool is_b_pressed = controller.is_pressed(espp::Controller::Button::B);
+    bool is_x_pressed = controller.is_pressed(espp::Controller::Button::X);
+    bool is_y_pressed = controller.is_pressed(espp::Controller::Button::Y);
+    bool is_select_pressed = controller.is_pressed(espp::Controller::Button::SELECT);
+    bool is_start_pressed = controller.is_pressed(espp::Controller::Button::START);
+    bool is_joystick_select_pressed = controller.is_pressed(espp::Controller::Button::JOYSTICK_SELECT);
+    fmt::print("Controller buttons:\n"
+               "\tA:      {}\n"
+               "\tB:      {}\n"
+               "\tX:      {}\n"
+               "\tY:      {}\n"
+               "\tMenu:   {}\n"
+               "\tHome:   {}\n"
+               "\tR3:     {}\n",
+               is_a_pressed,
+               is_b_pressed,
+               is_x_pressed,
+               is_y_pressed,
+               is_select_pressed,
+               is_start_pressed,
+               is_joystick_select_pressed
+               );
+    std::this_thread::sleep_for(100ms);
+  }
 
   // create the gamepad
   BleGamepad ble_gamepad("LodeStone", "Backbone", 95);

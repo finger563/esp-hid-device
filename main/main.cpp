@@ -22,8 +22,8 @@ extern "C" void app_main(void) {
   // NOTE: the QtPy S3 has a NeoPixel on GPIO39 (power for it is GPIO38)
 
   // NOTE: controller mapping:
-  // * R1 -> A0 (GPIO18)
-  // * R2 -> A1 (GPIO17)
+  // * R2 -> A0 (GPIO18 / ADC2_CH7)
+  // * R1 -> A1 (GPIO17 / ADC2_CH6)
   // * X  -> MI (GPIO37)
   // * Y  -> A3 (GPIO8)
   // * Rx -> SDA (GPIO7 / ADC1_CH6)

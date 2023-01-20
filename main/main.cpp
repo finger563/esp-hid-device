@@ -290,17 +290,29 @@ extern "C" void app_main(void) {
   // now that we're good let's start sending data
   auto report_period = 50ms;
   // set the previous state
-  espp::Controller::State previous_state;
+  espp::Controller::State previous_right_state;
+  LeftGamepadState previous_left_state;
   controller.update();
-  previous_state = controller.get_state();
+  previous_right_state = controller.get_state();
   while (true) {
     if (ble_gamepad.isConnected()) {
       auto start = std::chrono::high_resolution_clock::now();
+      // read the analog (right side)
+      right_joystick.update();
+      // read the left analog stick using ADS1x15
+      // left_joystick.update();
+      // read the left buttons (d-pad, etc.) using MCP23017
+      auto a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
+      auto b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
+      auto left_gamepad_state = get_left_gamepad_state(a_pins, b_pins);
       // read the state of the controller
       controller.update();
-      auto current_state = controller.get_state();
-      bool state_changed = current_state != previous_state;
-      previous_state = current_state;
+      auto current_right_state = controller.get_state();
+      bool state_changed =
+        current_right_state != previous_right_state ||
+        left_gamepad_state != previous_left_state;
+      previous_right_state = current_right_state;
+      previous_left_state = left_gamepad_state;
 
       // build the report by setting the gamepad state
       bool is_a_pressed = controller.is_pressed(espp::Controller::Button::A);
@@ -341,17 +353,8 @@ extern "C" void app_main(void) {
         ble_gamepad.releaseStart();
       }
 
-      // read the left buttons (d-pad, etc.) using MCP23017
-      auto a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
-      auto b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
-      auto left_gamepad_state = get_left_gamepad_state(a_pins, b_pins);
       // set the d-pad (HAT1)
       ble_gamepad.setHat1(left_gamepad_state.get_hat_value());
-
-      // read the analog (right side)
-      right_joystick.update();
-      // read the left analog stick using ADS1x15
-      left_joystick.update();
 
       // set the Rx / Ry analog stick values in the report
       auto right_int = right_joystick.position() * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
@@ -371,6 +374,7 @@ extern "C" void app_main(void) {
 
       // send the hid report, only if the button state changed?
       if (state_changed) {
+        logger.info("State changed, sending report!");
         ble_gamepad.sendReport();
       }
       // try to get exactly the desired report rate

@@ -17,6 +17,8 @@
 
 #include "ble_gamepad.hpp"
 
+#include "left_gamepad.hpp"
+
 #define I2C_NUM         (I2C_NUM_1)
 #define I2C_SCL_IO      (GPIO_NUM_40)
 #define I2C_SDA_IO      (GPIO_NUM_41)
@@ -24,6 +26,25 @@
 #define I2C_TIMEOUT_MS  (10)
 
 using namespace std::chrono_literals;
+
+// NOTE: RIGHT controller mapping:
+// * R2 -> A0 (GPIO18 / ADC2_CH7)
+// * R1 -> A1 (GPIO17 / ADC2_CH6)
+// * X  -> MI (GPIO37)
+// * Y  -> A3 (GPIO8)
+// * Rx -> SDA (GPIO7 / ADC1_CH6)
+// * Ry -> SCL (GPIO6 / ADC1_CH5)
+// * Menu -> TX (GPIO5)
+// * Home -> RX (GPIO16)
+// * R3 -> SCK (GPIO36)
+// * A  -> MO (GPIO35)
+// * B  -> A2 (GPIO9)
+
+// The channels on the ADS1015 that the left joystick and left trigger are wired
+// into.
+static constexpr int LX_CHANNEL = 1;
+static constexpr int LY_CHANNEL = 2;
+static constexpr int L2_CHANNEL = 0;
 
 bool operator !=(const espp::Controller::State& lhs, const espp::Controller::State& rhs) {
   return
@@ -129,8 +150,8 @@ extern "C" void app_main(void) {
 
     auto read_left_joystick = [&ads](float *x, float *y) -> bool {
       // this will be in mv
-      auto x_mv = ads.sample_mv(0); // Left Joystick X is on channel 0
-      auto y_mv = ads.sample_mv(1); // Left Joystick Y is on channel 1
+      auto x_mv = ads.sample_mv(LX_CHANNEL);
+      auto y_mv = ads.sample_mv(LY_CHANNEL);
       // convert [0, 3300]mV to approximately [-1.0f, 1.0f]
       *x = (float)(x_mv) / 1700.0f - 1.0f;
       *y = (float)(y_mv) / 1700.0f - 1.0f;
@@ -143,19 +164,6 @@ extern "C" void app_main(void) {
       });
 
   // NOTE: the QtPy S3 has a NeoPixel on GPIO39 (power for it is GPIO38)
-
-  // NOTE: RIGHT controller mapping:
-  // * R2 -> A0 (GPIO18 / ADC2_CH7)
-  // * R1 -> A1 (GPIO17 / ADC2_CH6)
-  // * X  -> MI (GPIO37)
-  // * Y  -> A3 (GPIO8)
-  // * Rx -> SDA (GPIO7 / ADC1_CH6)
-  // * Ry -> SCL (GPIO6 / ADC1_CH5)
-  // * Menu -> TX (GPIO5)
-  // * Home -> RX (GPIO16)
-  // * R3 -> SCK (GPIO36)
-  // * A  -> MO (GPIO35)
-  // * B  -> A2 (GPIO9)
 
   // create the controller (digital buttons) object
   espp::Controller controller(espp::Controller::DualConfig{
@@ -217,14 +225,34 @@ extern "C" void app_main(void) {
     controller.update();
     right_joystick.update();
     left_joystick.update();
-    auto right_position = right_joystick.position();
-    auto left_position = left_joystick.position();
-    logger.info("Left: {}", left_position.to_string());
-    logger.info("Right: {}", right_position.to_string());
-
     // read the left buttons (d-pad, etc.) using MCP23017
     auto mcp_port_a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
     auto mcp_port_b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
+    auto left_gamepad_state = get_left_gamepad_state(mcp_port_a_pins, mcp_port_b_pins);
+    logger.info("Left buttons:\n"
+               "\tUp:      {}\n"
+               "\tDown:    {}\n"
+               "\tLeft:    {}\n"
+               "\tRight:   {}\n"
+               "\tCapture: {}\n"
+               "\tOptions: {}\n"
+               "\tL1:      {}\n"
+               "\tL3:      {}",
+               (bool)left_gamepad_state.up,
+               (bool)left_gamepad_state.down,
+               (bool)left_gamepad_state.left,
+               (bool)left_gamepad_state.right,
+               (bool)left_gamepad_state.capture,
+               (bool)left_gamepad_state.options,
+               (bool)left_gamepad_state.l1,
+               (bool)left_gamepad_state.l3
+               );
+
+
+    auto right_position = right_joystick.position();
+    auto left_position = left_joystick.position();
+    logger.info("Joystick Left: {}", left_position.to_string());
+    logger.info("Joystick Right: {}", right_position.to_string());
 
     bool is_a_pressed = controller.is_pressed(espp::Controller::Button::A);
     bool is_b_pressed = controller.is_pressed(espp::Controller::Button::B);
@@ -233,14 +261,14 @@ extern "C" void app_main(void) {
     bool is_select_pressed = controller.is_pressed(espp::Controller::Button::SELECT);
     bool is_start_pressed = controller.is_pressed(espp::Controller::Button::START);
     bool is_joystick_select_pressed = controller.is_pressed(espp::Controller::Button::JOYSTICK_SELECT);
-    fmt::print("Controller buttons:\n"
+    logger.info("Right buttons:\n"
                "\tA:      {}\n"
                "\tB:      {}\n"
                "\tX:      {}\n"
                "\tY:      {}\n"
                "\tMenu:   {}\n"
                "\tHome:   {}\n"
-               "\tR3:     {}\n",
+               "\tR3:     {}",
                is_a_pressed,
                is_b_pressed,
                is_x_pressed,
@@ -316,15 +344,30 @@ extern "C" void app_main(void) {
       // read the left buttons (d-pad, etc.) using MCP23017
       auto a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
       auto b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
-      // TODO: set the d-pad (HAT1)
+      auto left_gamepad_state = get_left_gamepad_state(a_pins, b_pins);
+      // set the d-pad (HAT1)
+      ble_gamepad.setHat1(left_gamepad_state.get_hat_value());
 
       // read the analog (right side)
       right_joystick.update();
-      // TODO: set the Rx / Ry analog stick values in the report
-
       // read the left analog stick using ADS1x15
       left_joystick.update();
-      // TODO: set the Lx / Ly analog stick values in the report
+
+      // set the Rx / Ry analog stick values in the report
+      auto right_int = right_joystick.position() * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
+      ble_gamepad.setRightThumb((int16_t)right_int.x(), (int16_t)right_int.y());
+
+      // set the Lx / Ly analog stick values in the report
+      auto left_int = left_joystick.position() * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
+      ble_gamepad.setLeftThumb((int16_t)left_int.x(), (int16_t)left_int.y());
+
+      // TODO: read the left trigger (ads)
+      // TODO: set the left trigger in gamepad
+      ble_gamepad.setLeftTrigger(0);
+
+      // TODO: read the right trigger (adc)
+      // TODO: set the right trigger in gamepad
+      ble_gamepad.setRightTrigger(0);
 
       // send the hid report, only if the button state changed?
       if (state_changed) {

@@ -46,6 +46,12 @@ static constexpr int LX_CHANNEL = 1;
 static constexpr int LY_CHANNEL = 2;
 static constexpr int L2_CHANNEL = 0;
 
+bool operator !=(const espp::Vector2d<float>& lhs, const espp::Vector2d<float>& rhs) {
+  return
+    lhs.x() != rhs.x() ||
+    lhs.y() != rhs.y();
+}
+
 bool operator !=(const espp::Controller::State& lhs, const espp::Controller::State& rhs) {
   return
     lhs.a != rhs.a ||
@@ -107,17 +113,19 @@ extern "C" void app_main(void) {
   logger.info("Making MCP23017");
   // now make the mcp23x17 which handles GPIO
   espp::Mcp23x17 mcp23x17({
-      .port_a_direction_mask = (1 << 0),   // input on A0
-      .port_a_interrupt_mask = (1 << 0),   // interrupt on A0
-      .port_b_direction_mask = (1 << 7),   // input on B7
-      .port_b_interrupt_mask = (1 << 7),   // interrupt on B7
+      .port_a_direction_mask = PORT_A_PIN_MASK,   // input on A0
+      .port_a_interrupt_mask = (0),   // No interrupts on port A
+      .port_b_direction_mask = PORT_B_PIN_MASK,   // input on B7
+      .port_b_interrupt_mask = (0),   // No interrupts on port B
       .write = mcp23x17_write,
       .read = mcp23x17_read,
       .log_level = espp::Logger::Verbosity::WARN
     });
   // set pull up on the input pins
-  mcp23x17.set_pull_up(espp::Mcp23x17::Port::A, (1<<0));
-  mcp23x17.set_pull_up(espp::Mcp23x17::Port::B, (1<<7));
+  mcp23x17.set_pull_up(espp::Mcp23x17::Port::A, PORT_A_PIN_MASK);
+  mcp23x17.set_pull_up(espp::Mcp23x17::Port::B, PORT_B_PIN_MASK);
+  mcp23x17.set_input_polarity(espp::Mcp23x17::Port::A, PORT_A_PIN_MASK);
+  mcp23x17.set_input_polarity(espp::Mcp23x17::Port::B, PORT_B_PIN_MASK);
 
   logger.info("Making ADS1015 lambda functions!");
     // make some lambda functions we'll use to read/write to the i2c adc
@@ -229,6 +237,8 @@ extern "C" void app_main(void) {
     auto mcp_port_a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
     auto mcp_port_b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
     auto left_gamepad_state = get_left_gamepad_state(mcp_port_a_pins, mcp_port_b_pins);
+    logger.info("porta: {}", mcp_port_a_pins);
+    logger.info("portb: {}", mcp_port_b_pins);
     logger.info("Left buttons:\n"
                "\tUp:      {}\n"
                "\tDown:    {}\n"
@@ -290,6 +300,8 @@ extern "C" void app_main(void) {
   // now that we're good let's start sending data
   auto report_period = 50ms;
   // set the previous state
+  auto previous_left_position = left_joystick.position();
+  auto previous_right_position = right_joystick.position();
   espp::Controller::State previous_right_state;
   LeftGamepadState previous_left_state;
   controller.update();
@@ -299,8 +311,10 @@ extern "C" void app_main(void) {
       auto start = std::chrono::high_resolution_clock::now();
       // read the analog (right side)
       right_joystick.update();
+      auto right_position = right_joystick.position();
       // read the left analog stick using ADS1x15
-      // left_joystick.update();
+      left_joystick.update();
+      auto left_position = left_joystick.position();
       // read the left buttons (d-pad, etc.) using MCP23017
       auto a_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::A);
       auto b_pins = mcp23x17.get_pins(espp::Mcp23x17::Port::B);
@@ -310,9 +324,13 @@ extern "C" void app_main(void) {
       auto current_right_state = controller.get_state();
       bool state_changed =
         current_right_state != previous_right_state ||
-        left_gamepad_state != previous_left_state;
+        left_gamepad_state != previous_left_state ||
+        previous_right_position != right_position ||
+        previous_left_position != left_position;
       previous_right_state = current_right_state;
       previous_left_state = left_gamepad_state;
+      previous_left_position = left_position;
+      previous_right_position = right_position;
 
       // build the report by setting the gamepad state
       bool is_a_pressed = controller.is_pressed(espp::Controller::Button::A);
@@ -357,11 +375,11 @@ extern "C" void app_main(void) {
       ble_gamepad.setHat1(left_gamepad_state.get_hat_value());
 
       // set the Rx / Ry analog stick values in the report
-      auto right_int = right_joystick.position() * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
+      auto right_int = right_position * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
       ble_gamepad.setRightThumb((int16_t)right_int.x(), (int16_t)right_int.y());
 
       // set the Lx / Ly analog stick values in the report
-      auto left_int = left_joystick.position() * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
+      auto left_int = left_position * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
       ble_gamepad.setLeftThumb((int16_t)left_int.x(), (int16_t)left_int.y());
 
       // TODO: read the left trigger (ads)

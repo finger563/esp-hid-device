@@ -72,12 +72,14 @@ static constexpr int CAPTURE_BIT = (1<<7);
 static constexpr int OPTIONS_BIT = (1<<6);
 static constexpr int L1_BIT      = (1<<5);
 static constexpr int L3_BIT      = (1<<4);
+static constexpr int PORT_B_PIN_MASK = CAPTURE_BIT | OPTIONS_BIT | L1_BIT | L3_BIT;
 
 // PORT A of the MCP23017
 static constexpr int UP_BIT    = (1<<0);
 static constexpr int DOWN_BIT  = (1<<1);
 static constexpr int LEFT_BIT  = (1<<2);
 static constexpr int RIGHT_BIT = (1<<3);
+static constexpr int PORT_A_PIN_MASK = UP_BIT | DOWN_BIT | LEFT_BIT | RIGHT_BIT;
 
 LeftGamepadState get_left_gamepad_state(uint8_t port_a, uint8_t port_b) {
   LeftGamepadState state;

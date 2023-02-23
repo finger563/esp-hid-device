@@ -376,11 +376,11 @@ extern "C" void app_main(void) {
 
       // set the Rx / Ry analog stick values in the report
       auto right_int = right_position * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
-      ble_gamepad.setRightThumb((int16_t)right_int.x(), (int16_t)right_int.y());
+      ble_gamepad.setRightThumb((int16_t)-right_int.x(), (int16_t)-right_int.y());
 
       // set the Lx / Ly analog stick values in the report
       auto left_int = left_position * 16384.0f + espp::Vector2f(16384.0f, 16384.0f);
-      ble_gamepad.setLeftThumb((int16_t)left_int.x(), (int16_t)left_int.y());
+      ble_gamepad.setLeftThumb((int16_t)-left_int.x(), (int16_t)-left_int.y());
 
       // TODO: read the left trigger (ads)
       // TODO: set the left trigger in gamepad

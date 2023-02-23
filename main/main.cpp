@@ -87,27 +87,23 @@ extern "C" void app_main(void) {
   err = i2c_driver_install(I2C_NUM, I2C_MODE_MASTER,  0, 0, 0);
   if (err != ESP_OK) logger.error("install i2c driver failed");
 
-  logger.info("Making MCP23017 lambda functions!");
-  // make some lambda functions we'll use to read/write to the mcp23x17
-  auto mcp23x17_write = [](uint8_t reg_addr, uint8_t value) {
-    uint8_t data[] = {reg_addr, value};
+  // make some lambda functions we'll use to read/write to the devices on the i2c bus
+  auto i2c_write = [](uint8_t dev_addr, uint8_t *data, size_t data_len) {
     i2c_master_write_to_device(I2C_NUM,
-                               espp::Mcp23x17::ADDRESS,
+                               dev_addr,
                                data,
-                               2,
+                               data_len,
                                I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
   };
 
-  auto mcp23x17_read = [](uint8_t reg_addr) -> uint8_t{
-    uint8_t data;
+  auto i2c_read = [](uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, size_t data_len) {
     i2c_master_write_read_device(I2C_NUM,
-                                 espp::Mcp23x17::ADDRESS,
+                                 dev_addr,
                                  &reg_addr,
                                  1,
-                                 &data,
-                                 1,
+                                 data,
+                                 data_len,
                                  I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
-    return data;
   };
 
   logger.info("Making MCP23017");
@@ -117,8 +113,8 @@ extern "C" void app_main(void) {
       .port_a_interrupt_mask = (0),   // No interrupts on port A
       .port_b_direction_mask = PORT_B_PIN_MASK,   // input on B7
       .port_b_interrupt_mask = (0),   // No interrupts on port B
-      .write = mcp23x17_write,
-      .read = mcp23x17_read,
+      .write = i2c_write,
+      .read = i2c_read,
       .log_level = espp::Logger::Verbosity::WARN
     });
   // set pull up on the input pins
@@ -127,49 +123,27 @@ extern "C" void app_main(void) {
   mcp23x17.set_input_polarity(espp::Mcp23x17::Port::A, PORT_A_PIN_MASK);
   mcp23x17.set_input_polarity(espp::Mcp23x17::Port::B, PORT_B_PIN_MASK);
 
-  logger.info("Making ADS1015 lambda functions!");
-    // make some lambda functions we'll use to read/write to the i2c adc
-    auto ads_write = [](uint8_t reg_addr, uint16_t value) {
-      uint8_t write_buf[3] = {reg_addr, (uint8_t)(value >> 8), (uint8_t)(value & 0xFF)};
-      i2c_master_write_to_device(I2C_NUM,
-                                 espp::Ads1x15::ADDRESS,
-                                 write_buf,
-                                 3,
-                                 I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
-    };
-    auto ads_read = [](uint8_t reg_addr) -> uint16_t {
-      uint8_t read_data[2];
-      i2c_master_write_read_device(I2C_NUM,
-                                   espp::Ads1x15::ADDRESS,
-                                   &reg_addr,
-                                   1, // size of addr
-                                   read_data,
-                                   2,
-                                   I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
-      return (read_data[0] << 8) | read_data[1];
-    };
+  logger.info("Making ADS1015");
+  // make the actual ads class
+  espp::Ads1x15 ads(espp::Ads1x15::Ads1015Config{
+      .write = i2c_write,
+      .read = i2c_read
+    });
 
-    logger.info("Making ADS1015");
-    // make the actual ads class
-    espp::Ads1x15 ads(espp::Ads1x15::Ads1015Config{
-        .write = ads_write,
-        .read = ads_read
-      });
-
-    auto read_left_joystick = [&ads](float *x, float *y) -> bool {
-      // this will be in mv
-      auto x_mv = ads.sample_mv(LX_CHANNEL);
-      auto y_mv = ads.sample_mv(LY_CHANNEL);
-      // convert [0, 3300]mV to approximately [-1.0f, 1.0f]
-      *x = (float)(x_mv) / 1700.0f - 1.0f;
-      *y = (float)(y_mv) / 1700.0f - 1.0f;
-      return true;
-    };
-    espp::Joystick left_joystick({
-        .x_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
-        .y_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
-        .get_values = read_left_joystick,
-      });
+  auto read_left_joystick = [&ads](float *x, float *y) -> bool {
+    // this will be in mv
+    auto x_mv = ads.sample_mv(LX_CHANNEL);
+    auto y_mv = ads.sample_mv(LY_CHANNEL);
+    // convert [0, 3300]mV to approximately [-1.0f, 1.0f]
+    *x = (float)(x_mv) / 1700.0f - 1.0f;
+    *y = (float)(y_mv) / 1700.0f - 1.0f;
+    return true;
+  };
+  espp::Joystick left_joystick({
+      .x_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
+      .y_calibration = {.center = 0.0f, .deadband = 0.2f, .minimum = -1.0f, .maximum = 1.0f},
+      .get_values = read_left_joystick,
+    });
 
   // NOTE: the QtPy S3 has a NeoPixel on GPIO39 (power for it is GPIO38)
 
@@ -240,23 +214,23 @@ extern "C" void app_main(void) {
     logger.info("porta: {}", mcp_port_a_pins);
     logger.info("portb: {}", mcp_port_b_pins);
     logger.info("Left buttons:\n"
-               "\tUp:      {}\n"
-               "\tDown:    {}\n"
-               "\tLeft:    {}\n"
-               "\tRight:   {}\n"
-               "\tCapture: {}\n"
-               "\tOptions: {}\n"
-               "\tL1:      {}\n"
-               "\tL3:      {}",
-               (bool)left_gamepad_state.up,
-               (bool)left_gamepad_state.down,
-               (bool)left_gamepad_state.left,
-               (bool)left_gamepad_state.right,
-               (bool)left_gamepad_state.capture,
-               (bool)left_gamepad_state.options,
-               (bool)left_gamepad_state.l1,
-               (bool)left_gamepad_state.l3
-               );
+                "\tUp:      {}\n"
+                "\tDown:    {}\n"
+                "\tLeft:    {}\n"
+                "\tRight:   {}\n"
+                "\tCapture: {}\n"
+                "\tOptions: {}\n"
+                "\tL1:      {}\n"
+                "\tL3:      {}",
+                (bool)left_gamepad_state.up,
+                (bool)left_gamepad_state.down,
+                (bool)left_gamepad_state.left,
+                (bool)left_gamepad_state.right,
+                (bool)left_gamepad_state.capture,
+                (bool)left_gamepad_state.options,
+                (bool)left_gamepad_state.l1,
+                (bool)left_gamepad_state.l3
+                );
 
 
     auto right_position = right_joystick.position();
@@ -272,21 +246,21 @@ extern "C" void app_main(void) {
     bool is_start_pressed = controller.is_pressed(espp::Controller::Button::START);
     bool is_joystick_select_pressed = controller.is_pressed(espp::Controller::Button::JOYSTICK_SELECT);
     logger.info("Right buttons:\n"
-               "\tA:      {}\n"
-               "\tB:      {}\n"
-               "\tX:      {}\n"
-               "\tY:      {}\n"
-               "\tMenu:   {}\n"
-               "\tHome:   {}\n"
-               "\tR3:     {}",
-               is_a_pressed,
-               is_b_pressed,
-               is_x_pressed,
-               is_y_pressed,
-               is_select_pressed,
-               is_start_pressed,
-               is_joystick_select_pressed
-               );
+                "\tA:      {}\n"
+                "\tB:      {}\n"
+                "\tX:      {}\n"
+                "\tY:      {}\n"
+                "\tMenu:   {}\n"
+                "\tHome:   {}\n"
+                "\tR3:     {}",
+                is_a_pressed,
+                is_b_pressed,
+                is_x_pressed,
+                is_y_pressed,
+                is_select_pressed,
+                is_start_pressed,
+                is_joystick_select_pressed
+                );
     std::this_thread::sleep_for(100ms);
   }
 

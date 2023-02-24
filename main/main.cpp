@@ -156,6 +156,7 @@ extern "C" void app_main(void) {
   while (true) {
     if (ble_gamepad.isConnected()) {
       auto start = std::chrono::high_resolution_clock::now();
+      // NOTE: if you run this without the ADS connected, it will fail
       gamepad.update();
       auto right_position = gamepad.get_right_joystick_position();
       auto left_position = gamepad.get_left_joystick_position();
@@ -180,9 +181,9 @@ extern "C" void app_main(void) {
         ble_gamepad.release(BUTTON_3);
       }
       if (button_state.y) {
-        ble_gamepad.press(BUTTON_3);
+        ble_gamepad.press(BUTTON_4);
       } else {
-        ble_gamepad.release(BUTTON_3);
+        ble_gamepad.release(BUTTON_4);
       }
       if (button_state.menu) {
         ble_gamepad.pressSelect();
@@ -207,10 +208,10 @@ extern "C" void app_main(void) {
       ble_gamepad.setLeftThumb((int16_t)-left_int.x(), (int16_t)-left_int.y());
 
       // set the left trigger in gamepad
-      ble_gamepad.setLeftTrigger((int16_t)(16384.0f * l2));
+      ble_gamepad.setLeftTrigger((int16_t)(255.0f * l2));
 
       // set the right trigger in gamepad
-      ble_gamepad.setRightTrigger((int16_t)(16384.0f * r2));
+      ble_gamepad.setRightTrigger((int16_t)(255.0f * r2));
 
       // send the hid report, only if the button state changed?
       bool state_changed = previous_state != button_state;

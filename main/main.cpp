@@ -13,8 +13,8 @@
 #include "gamepad.hpp"
 
 #define I2C_NUM         (I2C_NUM_1)
-#define I2C_SCL_IO      (GPIO_NUM_40)
-#define I2C_SDA_IO      (GPIO_NUM_41)
+#define I2C_SCL_IO      (GPIO_NUM_22)
+#define I2C_SDA_IO      (GPIO_NUM_21)
 #define I2C_FREQ_HZ     (400 * 1000)
 #define I2C_TIMEOUT_MS  (10)
 

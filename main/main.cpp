@@ -88,57 +88,10 @@ extern "C" void app_main(void) {
       .right_adc_address = espp::Ads1x15::DEFAULT_ADDRESS,
     });
 
+  // NOTE: for debugging pure controller functionality
   while (false) {
     gamepad.update();
-    // read the left buttons (d-pad, etc.) using MCP23017
-    auto button_state = gamepad.get_button_state();
-    logger.info("Buttons:\n"
-                "\tUp:      {}\n"
-                "\tDown:    {}\n"
-                "\tLeft:    {}\n"
-                "\tRight:   {}\n"
-                "\tCapture: {}\n"
-                "\tOptions: {}\n"
-                "\tL1:      {}\n"
-                "\tL3:      {}\n"
-                "-------------\n"
-                "\tA:      {}\n"
-                "\tB:      {}\n"
-                "\tX:      {}\n"
-                "\tY:      {}\n"
-                "\tMenu:   {}\n"
-                "\tHome:   {}\n"
-                "\tR1:     {}\n"
-                "\tR3:     {}",
-                (bool)button_state.up,
-                (bool)button_state.down,
-                (bool)button_state.left,
-                (bool)button_state.right,
-                (bool)button_state.capture,
-                (bool)button_state.options,
-                (bool)button_state.l1,
-                (bool)button_state.l3,
-                // right side
-                (bool)button_state.a,
-                (bool)button_state.b,
-                (bool)button_state.x,
-                (bool)button_state.y,
-                (bool)button_state.menu,
-                (bool)button_state.home,
-                (bool)button_state.r1,
-                (bool)button_state.r3
-                );
-
-    auto right_position = gamepad.get_right_joystick_position();
-    auto left_position = gamepad.get_left_joystick_position();
-    logger.info("Joystick Left: {}", left_position.to_string());
-    logger.info("Joystick Right: {}", right_position.to_string());
-
-    auto l2 = gamepad.get_trigger_l2();
-    auto r2 = gamepad.get_trigger_r2();
-    logger.info("L2: {}", l2);
-    logger.info("R2: {}", r2);
-
+    logger.info("{}", gamepad.to_string());
     std::this_thread::sleep_for(100ms);
   }
 
@@ -150,14 +103,19 @@ extern "C" void app_main(void) {
   ble_gamepad.begin(&ble_gamepad_config);
 
   // now that we're good let's start sending data
-  auto report_period = 50ms;
+  auto report_period = 500ms;
   // set the previous state
   ButtonState previous_state = gamepad.get_button_state();
   while (true) {
     if (ble_gamepad.isConnected()) {
       auto start = std::chrono::high_resolution_clock::now();
+
       // NOTE: if you run this without the ADS connected, it will fail
       gamepad.update();
+
+      // NOTE: for debugging....
+      logger.info("{}", gamepad.to_string());
+
       auto right_position = gamepad.get_right_joystick_position();
       auto left_position = gamepad.get_left_joystick_position();
       auto button_state = gamepad.get_button_state();
@@ -176,14 +134,14 @@ extern "C" void app_main(void) {
         ble_gamepad.release(BUTTON_2);
       }
       if (button_state.x) {
-        ble_gamepad.press(BUTTON_3);
-      } else {
-        ble_gamepad.release(BUTTON_3);
-      }
-      if (button_state.y) {
         ble_gamepad.press(BUTTON_4);
       } else {
         ble_gamepad.release(BUTTON_4);
+      }
+      if (button_state.y) {
+        ble_gamepad.press(BUTTON_5);
+      } else {
+        ble_gamepad.release(BUTTON_5);
       }
       if (button_state.menu) {
         ble_gamepad.pressSelect();

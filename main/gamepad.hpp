@@ -190,6 +190,56 @@ public:
     right_io_.led(LED_B_BIT << 8, b);
   }
 
+  std::string to_string() {
+    return fmt::format("Gamepad State:\n"
+                       "\tUp:      {}\n"
+                       "\tDown:    {}\n"
+                       "\tLeft:    {}\n"
+                       "\tRight:   {}\n"
+                       "\tCapture: {}\n"
+                       "\tOptions: {}\n"
+                       "\tL1:      {}\n"
+                       "\tL2:      {:.2f}\n"
+                       "\tL3:      {}\n"
+                       "\tLX:      {:.2f}\n"
+                       "\tLY:      {:.2f}\n"
+                       "-------------\n"
+                       "\tA:       {}\n"
+                       "\tB:       {}\n"
+                       "\tX:       {}\n"
+                       "\tY:       {}\n"
+                       "\tMenu:    {}\n"
+                       "\tHome:    {}\n"
+                       "\tR1:      {}\n"
+                       "\tR2:      {:.2f}\n"
+                       "\tR3:      {}\n"
+                       "\tRX:      {:.2f}\n"
+                       "\tRY:      {:.2f}",
+                       (bool)button_state_.up,
+                       (bool)button_state_.down,
+                       (bool)button_state_.left,
+                       (bool)button_state_.right,
+                       (bool)button_state_.capture,
+                       (bool)button_state_.options,
+                       (bool)button_state_.l1,
+                       trigger_l2_,
+                       (bool)button_state_.l3,
+                       left_joystick_.x(),
+                       left_joystick_.y(),
+                       // right side
+                       (bool)button_state_.a,
+                       (bool)button_state_.b,
+                       (bool)button_state_.x,
+                       (bool)button_state_.y,
+                       (bool)button_state_.menu,
+                       (bool)button_state_.home,
+                       (bool)button_state_.r1,
+                       trigger_r2_,
+                       (bool)button_state_.r3,
+                       right_joystick_.x(),
+                       right_joystick_.y());
+  }
+
 protected:
   // PORT 0 of the right AW9523
   static constexpr int A_BIT  = (1<<0);

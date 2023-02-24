@@ -11,7 +11,7 @@ set(EXTRA_COMPONENT_DIRS
 
 set(
   COMPONENTS
-  "main esptool_py driver esp_hid esp-nimble-cpp ble_gamepad adc ads1x15 mcp23x17 joystick task logger controller"
+  "main esptool_py driver esp_hid esp-nimble-cpp ble_gamepad adc ads1x15 aw9523 joystick task logger controller"
   CACHE STRING
   "List of components to include"
 )

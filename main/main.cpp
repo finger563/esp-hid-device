@@ -6,6 +6,8 @@
 #include <string.h>
 
 #include "driver/i2c.h"
+#include "esp_sleep.h"
+#include "esp_pm.h"
 
 #include "logger.hpp"
 #include "task.hpp"
@@ -30,6 +32,18 @@ extern "C" void app_main(void) {
   esp_err_t err;
   espp::Logger logger({.tag = "LodeStone", .level = espp::Logger::Verbosity::INFO});
   logger.info("Bootup");
+
+#if CONFIG_PM_ENABLE
+    // Configure dynamic frequency scaling:
+    // maximum and minimum frequencies are set in sdkconfig,
+    // automatic light sleep is enabled if tickless idle support is enabled.
+    esp_pm_config_esp32_t pm_config = {
+            .max_freq_mhz = 240,
+            .min_freq_mhz = 40,
+            .light_sleep_enable = true
+    };
+    ESP_ERROR_CHECK( esp_pm_configure(&pm_config) );
+#endif // CONFIG_PM_ENABLE
 
   // make the I2C that we'll use to communicate
   i2c_config_t i2c_cfg;
